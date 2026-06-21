@@ -1,11 +1,10 @@
 import os
 import uuid
-import asyncio
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from pymongo import MongoClient
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
 # ==========================================
 # CONFIGURATIONS
@@ -19,9 +18,6 @@ ADMIN_ID = 5169962212  # আপনার Telegram User ID
 client = MongoClient(MONGO_URI)
 db = client["MovieBoxBD"]
 movies_collection = db["movies"]
-
-# Bot State Management
-user_steps = {}
 
 # ==========================================
 # HTML/CSS/JS TEMPLATES (0-Bandwidth Architecture)
@@ -59,7 +55,7 @@ BASE_HTML = """
         .movie-info p {{ font-size: 13px; color: var(--text-secondary); }}
 
         .hero-section {{ text-align: center; margin-bottom: 40px; }}
-        .hero-section h1 {{ font-size: 2.5rem; margin-bottom: 10px; }}
+        .hero-section h1 {{ font-size: 2.5rem; margin-bottom: 10px; word-wrap: break-word; }}
         .meta-tags {{ display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; color: var(--text-secondary); font-size: 15px; margin-bottom: 30px; }}
         .meta-tags span {{ background: #333; padding: 5px 12px; border-radius: 20px; }}
         
@@ -109,7 +105,7 @@ def get_home_html(movies):
                     <div class="movie-poster">🎬</div>
                     <div class="movie-info">
                         <h3>{m['title']}</h3>
-                        <p>{m['year']} • {m['quality']}</p>
+                        <p>{m['size']}</p>
                     </div>
                 </div>
             </a>
@@ -118,20 +114,18 @@ def get_home_html(movies):
     return BASE_HTML.replace("{PAGE_TITLE}", "Home").replace("{CONTENT}", content)
 
 def get_movie_html(movie):
-    # Watch বাটন এখন Direct Telegram Link এ পয়েন্ট করবে (যাতে Render এর Bandwidth না কাটে)
+    title = movie.get('title', 'Untitled')
+    size = movie.get('size', 'Unknown Size')
+    
     stream_url = f"{BASE_URL}/watch/{movie['slug']}"
     download_url = f"{BASE_URL}/download/{movie['slug']}"
     
+    # শুধুমাত্র সাইজটি দেখাবে, কারণ অন্য কোনো তথ্য নেই
     content = f"""
     <div class="hero-section">
-        <h1>{movie['title']}</h1>
+        <h1>{title}</h1>
         <div class="meta-tags">
-            <span>📅 {movie['year']}</span>
-            <span>🎭 {movie['genre']}</span>
-            <span>🗣️ {movie['language']}</span>
-            <span>🎥 {movie['quality']}</span>
-            <span>📦 {movie['size']}</span>
-            <span>⏱️ {movie['duration']}</span>
+            <span>📦 {size}</span>
         </div>
     </div>
     
@@ -140,7 +134,7 @@ def get_movie_html(movie):
         <a href="{download_url}" class="btn btn-download">⬇️ Download Movie</a>
     </div>
     """
-    return BASE_HTML.replace("{PAGE_TITLE}", movie['title']).replace("{CONTENT}", content)
+    return BASE_HTML.replace("{PAGE_TITLE}", title).replace("{CONTENT}", content)
 
 # ==========================================
 # FASTAPI WEB SERVER
@@ -166,10 +160,8 @@ async def watch_movie(slug: str):
     if not movie or "file_path" not in movie:
         return HTMLResponse("<h1>Movie Not Found</h1>")
     
-    # সরাসরি Telegram Server এর Original File Link তৈরি করা হচ্ছে
     tg_direct_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{movie['file_path']}"
     
-    # এই পেজটি মাত্র কয়েক KB এর হবে। এরপর ব্রাউজার সরাসরি Telegram থেকে ভিডিও লোড করবে
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -185,12 +177,10 @@ async def watch_movie(slug: str):
     <body>
         <div class="loader"></div>
         <h2>Connecting to Stream...</h2>
-        <p style="color:#888; margin-top:10px;">Preparing your movie. Please wait.</p>
+        <p style="color:#888; margin-top:10px;">Preparing your video. Please wait.</p>
         <p>If the video doesn't start automatically, <a href="{tg_direct_url}" target="_blank">Click Here to Play</a></p>
         
         <script>
-            // এখানেই ম্যাজিক! ব্রাউজারকে সরাসরি Telegram এ পাঠিয়ে দেওয়া হচ্ছে। 
-            // Render এর ব্যান্ডউইথ এখানে একদম কাটবে না।
             window.location.href = "{tg_direct_url}";
         </script>
         <script>
@@ -212,9 +202,8 @@ async def download_movie(slug: str):
         return HTMLResponse("<h1>Movie Not Found</h1>")
     
     tg_direct_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{movie['file_path']}"
-    filename = f"{movie['title']} ({movie['quality']}).mp4"
+    filename = f"{movie['title']}.mp4"
 
-    # ডাউনলোড ফোর্স করার জন্য একটি ছোট ট্রিক
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -232,7 +221,6 @@ async def download_movie(slug: str):
         <a href="{tg_direct_url}" download="{filename}">⬇️ Click Here to Download</a>
         
         <script>
-            // স্বয়ংক্রিয়ভাবে ডাউনলোড শুরু করার চেষ্টা
             setTimeout(function() {{
                 const a = document.createElement('a');
                 a.href = "{tg_direct_url}";
@@ -250,45 +238,19 @@ async def download_movie(slug: str):
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    await application.update_queue.put(Update.de_json(data, application.bot))
+    # process_update ব্যবহার করা হয়েছে যাতে কোনো কনফ্লিক্ট না হয়
+    await application.process_update(Update.de_json(data, application.bot))
     return {"status": "ok"}
 
 # ==========================================
 # TELEGRAM BOT LOGIC
 # ==========================================
-application = Application.builder().token(BOT_TOKEN).build()
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return await update.message.reply_text("⚠️ Unauthorized Access!")
-    await update.message.reply_text(
-        "🟢 *MovieBoxBD Bot Active!*\n\n"
-        "মুভি আপলোড করতে নিচের ফরম্যাটে মেসেজ পাঠান:\n"
-        "`Title | Year | Genre | Language | Quality | Duration`\n\n"
-        "উদাহরণ:\n`Inception | 2010 | Sci-Fi | English | 1080p | 2h 28m`",
-        parse_mode="Markdown"
-    )
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    user_id = update.effective_user.id
-    
-    text = update.message.text
-    parts = [p.strip() for p in text.split("|")]
-    
-    if len(parts) == 6:
-        user_steps[user_id] = {"step": "awaiting_file", "info": parts}
-        await update.message.reply_text("✅ তথ্য সংরক্ষিত হয়েছে।\nএখন মুভির ফাইলটি (MP4/MKV) পাঠান।")
-    else:
-        await update.message.reply_text("❌ ভুল ফরম্যাট! আবার চেষ্টা করুন।")
+# ERROR FIX: updater=None যুক্ত করা হয়েছে যাতে Polling Cleanup এর এরর না হয়
+application = Application.builder().token(BOT_TOKEN).updater(None).build()
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    user_id = update.effective_user.id
-    
-    state = user_steps.get(user_id)
-    if not state or state["step"] != "awaiting_file":
-        return await update.message.reply_text("⚠️ আগে মুভির তথ্য পাঠান।")
+    if update.effective_user.id != ADMIN_ID:
+        return await update.message.reply_text("⚠️ Unauthorized Access!")
 
     file = update.message.document or update.message.video
     if not file:
@@ -300,16 +262,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tg_file = await context.bot.get_file(file.file_id)
         slug = str(uuid.uuid4())[:8]
         size_mb = round(file.file_size / (1024 * 1024), 2)
-        info = state["info"]
+        
+        # ফাইলের নাম থেকে এক্সটেনশন (যেমন .mp4) বাদ দিয়ে শুধু নাম নেওয়া হচ্ছে
+        file_name = file.file_name if file.file_name else "Untitled Movie"
+        title = os.path.splitext(file_name)[0]
 
         movies_collection.insert_one({
             "slug": slug,
-            "title": info[0],
-            "year": info[1],
-            "genre": info[2],
-            "language": info[3],
-            "quality": info[4],
-            "duration": info[5],
+            "title": title,
             "size": f"{size_mb} MB",
             "file_id": file.file_id,
             "file_path": tg_file.file_path
@@ -317,17 +277,17 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         link = f"{BASE_URL}/m/{slug}"
         await update.message.reply_text(
-            f"🎉 *মুভি সফলভাবে আপলোড হয়েছে!*\n\n"
+            f"🎉 *সফলভাবে আপলোড হয়েছে!*\n\n"
+            f"📎 *নাম:* {title}\n"
+            f"📦 *সাইজ:* {size_mb} MB\n\n"
             f"🔗 *Public Link:*\n{link}",
             parse_mode="Markdown"
         )
-        del user_steps[user_id]
         
     except Exception as e:
         await update.message.reply_text(f"❌ এরর হয়েছে: {str(e)}")
 
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# শুধুমাত্র ফাইল/ভিডিও রিসিভ করার হ্যান্ডলার
 application.add_handler(MessageHandler(filters.Document.ALL | filters.Video.ALL, handle_file))
 
 # ==========================================
@@ -335,11 +295,10 @@ application.add_handler(MessageHandler(filters.Document.ALL | filters.Video.ALL,
 # ==========================================
 @app.on_event("startup")
 async def startup_event():
-    webhook_url = f"{BASE_URL}/webhook"
-    await application.bot.set_webhook(url=webhook_url)
     await application.initialize()
-    await application.start()
-    print("Bot Webhook Set & 0-Bandwidth Server Started!")
+    # ম্যানুয়ালি ওয়েবহুক সেট করা হচ্ছে
+    await application.bot.set_webhook(url=f"{BASE_URL}/webhook")
+    print("✅ Bot Webhook Set & 0-Bandwidth Server Started!")
 
 if __name__ == "__main__":
     import uvicorn
