@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # ==========================================
 BOT_TOKEN = "8820885916:AAHOQXbhi4mrs_f-LrlO_6DXs7xRzksBEXk" # আপনার বট টোকেন
 MONGO_URI = "mongodb+srv://airdroptimer:sakib72542@movieboxpro.mi2hrkd.mongodb.net/?appName=movieboxpro" # আপনার MongoDB URI
-BASE_URL = "https://your-app-name.onrender.com" # আপনার Render URL (শেষে / দেবেন না)
+BASE_URL = "https://movieboxstream.onrender.com" # আপনার Render URL (শেষে / দেবেন না)
 ADMIN_ID = 5169962212  # আপনার Telegram User ID
 
 # Database Setup
