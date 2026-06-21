@@ -120,7 +120,6 @@ def get_movie_html(movie):
     stream_url = f"{BASE_URL}/watch/{movie['slug']}"
     download_url = f"{BASE_URL}/download/{movie['slug']}"
     
-    # শুধুমাত্র সাইজটি দেখাবে, কারণ অন্য কোনো তথ্য নেই
     content = f"""
     <div class="hero-section">
         <h1>{title}</h1>
@@ -238,14 +237,13 @@ async def download_movie(slug: str):
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    # process_update ব্যবহার করা হয়েছে যাতে কোনো কনফ্লিক্ট না হয়
     await application.process_update(Update.de_json(data, application.bot))
     return {"status": "ok"}
 
 # ==========================================
 # TELEGRAM BOT LOGIC
 # ==========================================
-# ERROR FIX: updater=None যুক্ত করা হয়েছে যাতে Polling Cleanup এর এরর না হয়
+# ERROR FIX: updater=None যুক্ত করা হয়েছে
 application = Application.builder().token(BOT_TOKEN).updater(None).build()
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -263,7 +261,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         slug = str(uuid.uuid4())[:8]
         size_mb = round(file.file_size / (1024 * 1024), 2)
         
-        # ফাইলের নাম থেকে এক্সটেনশন (যেমন .mp4) বাদ দিয়ে শুধু নাম নেওয়া হচ্ছে
         file_name = file.file_name if file.file_name else "Untitled Movie"
         title = os.path.splitext(file_name)[0]
 
@@ -287,8 +284,8 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ এরর হয়েছে: {str(e)}")
 
-# শুধুমাত্র ফাইল/ভিডিও রিসিভ করার হ্যান্ডলার
-application.add_handler(MessageHandler(filters.Document.ALL | filters.Video.ALL, handle_file))
+# ERROR FIX: filters.Video.ALL এর বদলে বড় হাতের filters.VIDEO ব্যবহার করা হয়েছে
+application.add_handler(MessageHandler(filters.Document.ALL | filters.VIDEO, handle_file))
 
 # ==========================================
 # STARTUP EVENT
@@ -296,7 +293,6 @@ application.add_handler(MessageHandler(filters.Document.ALL | filters.Video.ALL,
 @app.on_event("startup")
 async def startup_event():
     await application.initialize()
-    # ম্যানুয়ালি ওয়েবহুক সেট করা হচ্ছে
     await application.bot.set_webhook(url=f"{BASE_URL}/webhook")
     print("✅ Bot Webhook Set & 0-Bandwidth Server Started!")
 
