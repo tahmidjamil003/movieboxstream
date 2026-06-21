@@ -14,7 +14,7 @@ MONGO_URI = "mongodb+srv://airdroptimer:sakib72542@movieboxpro.mi2hrkd.mongodb.n
 BASE_URL = "https://movieboxstream.onrender.com" # আপনার Render URL
 ADMIN_ID = 5169962212  # আপনার Telegram User ID
 
-# গুরুত্বপূর্ণ: আপনার প্রাইভেট চ্যানেলের আইডি এখানে বসান (উদাহরণ: -1001234567890)
+# আপনার প্রাইভেট চ্যানেলের আইডি (উদাহরণ: -1001234567890)
 CHANNEL_ID = -1003573920353 
 
 # Database Setup
@@ -133,14 +133,11 @@ async def movie_details(slug: str):
     if not movie: return "<h1>Movie Not Found</h1>"
     return get_movie_html(movie)
 
-# Watch endpoint: এখানে সরাসরি Telegram চ্যানেল লিংকে রিডাইরেক্ট করবে
 @app.get("/watch/{slug}")
 async def watch_movie(slug: str):
     movie = movies_collection.find_one({"slug": slug})
     if not movie or "channel_link" not in movie:
         return HTMLResponse("<h1>Movie Not Found</h1>")
-    
-    # ইউজারকে সরাসরি টেলিগ্রাম চ্যানেলের মেসেজে পাঠিয়ে দেওয়া হচ্ছে
     return RedirectResponse(url=movie["channel_link"])
 
 @app.post("/webhook")
@@ -170,17 +167,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_name = file.file_name if file.file_name else "Untitled Movie"
         title = os.path.splitext(file_name)[0]
 
-        # বট ফাইলটি নিজের চ্যানেলে পাঠাচ্ছে (এখানে কোনো সাইজ লিমিট নেই)
         msg = await context.bot.send_document(
             chat_id=CHANNEL_ID, 
             document=file.file_id,
             caption=f"🎬 {title}\n📦 Size: {size_mb} MB\n🌐 MovieBoxBD"
         )
 
-        # চ্যানেলের প্রাইভেট মেসেজ লিংক তৈরি করা হচ্ছে
         channel_link = f"https://t.me/c/{str(CHANNEL_ID).replace('-100', '')}/{msg.message_id}"
 
-        # ডাটাবেজে সেভ করা হচ্ছে
         movies_collection.insert_one({
             "slug": slug,
             "title": title,
@@ -189,12 +183,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
 
         link = f"{BASE_URL}/m/{slug}"
+        
+        # ERROR FIX: Markdown এর বদলে HTML ব্যবহার করা হয়েছে
         await update.message.reply_text(
-            f"🎉 *সফলভাবে আপলোড হয়েছে!*\n\n"
-            f"📎 *নাম:* {title}\n"
-            f"📦 *সাইজ:* {size_mb} MB\n\n"
-            f"🔗 *Public Link:*\n{link}",
-            parse_mode="Markdown"
+            f"🎉 <b>সফলভাবে আপলোড হয়েছে!</b>\n\n"
+            f"📎 <b>নাম:</b> {title}\n"
+            f"📦 <b>সাইজ:</b> {size_mb} MB\n\n"
+            f"🔗 <b>Public Link:</b>\n{link}",
+            parse_mode="HTML"
         )
         
     except Exception as e:
